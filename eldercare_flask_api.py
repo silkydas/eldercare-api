@@ -37,7 +37,7 @@ except ImportError:
 # ⚠️  UPDATE THESE VALUES
 # ─────────────────────────────────────────────
 import os
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', 'AIzaSyDlS0FokFFaAdjDnoNbpUaB-ZW3Hx-uVak')
+GEMINI_API_KEY = "AIzaSyDlS0FokFFaAdjDnoNbpUaB-ZW3Hx-uVak"  # keep directly for now
 
 from urllib.parse import quote_plus
 password  = quote_plus("eldercare@123")
@@ -114,7 +114,7 @@ except Exception as e:
 
 # Gemini setup
 GEMINI_CLIENT = None
-if GEMINI_AVAILABLE and GEMINI_API_KEY != "AIzaSyDlS0FokFFaAdjDnoNbpUaB-ZW3Hx-uVak":
+if GEMINI_AVAILABLE and GEMINI_API_KEY:
     try:
         GEMINI_CLIENT = genai.Client(api_key=GEMINI_API_KEY)
         print("✅ Gemini AI connected")
