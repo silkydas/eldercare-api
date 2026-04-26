@@ -1,0 +1,1 @@
+web: gunicorn eldercare_flask_api:app
