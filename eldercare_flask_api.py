@@ -4,11 +4,11 @@ ElderCare+ Flask API with MongoDB Atlas
 REST API with full database connectivity
 
 ENDPOINTS:
-  GET  /health          → Check server
-  POST /predict         → Get risk level
-  POST /analyze         → Risk + Gemini recommendation
-  POST /save_reading    → Save health reading to MongoDB
-  GET  /history/<user>  → Get patient history from MongoDB
+  GET  /health          -> Check server
+  POST /predict         -> Get risk level
+  POST /analyze         -> Risk + Gemini recommendation
+  POST /save_reading    -> Save health reading to MongoDB
+  GET  /history/<user>  -> Get patient history from MongoDB
 
 HOW TO RUN:
   cd C:/Users/AJAY/OneDrive/Desktop/eldercare
@@ -28,7 +28,6 @@ from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure
 import certifi
 
-
 try:
     from google import genai
     GEMINI_AVAILABLE = True
@@ -36,15 +35,13 @@ except ImportError:
     GEMINI_AVAILABLE = False
 
 # ─────────────────────────────────────────────
-# ⚠️  UPDATE THESE VALUES
+# CONFIGURATION
 # ─────────────────────────────────────────────
-import os
-GEMINI_API_KEY = "AIzaSyB0Zbl0Btb3uwzsJHzLHhku0erM17IkXYQ" # keep directly for now
+GEMINI_API_KEY = "AIzaSyB0Zbl0Btb3uwzsJHzLHhku0erM17IkXYQ"
 
 from urllib.parse import quote_plus
 password  = quote_plus("eldercare@123")
 MONGO_URI = f"mongodb+srv://eldercare_user:{password}@cluster0.fxmuvwk.mongodb.net/?appName=Cluster0"
-# Replace YOUR_PASSWORD with your actual MongoDB password
 
 # ─────────────────────────────────────────────
 # FLASK SETUP
@@ -65,7 +62,12 @@ READINGS_COL  = None
 USERS_COL     = None
 
 try:
-    DB_CLIENT    = MongoClient(MONGO_URI, tlsCAFile=certifi.where(), serverSelectionTimeoutMS=10000, connectTimeoutMS=20000)
+    DB_CLIENT    = MongoClient(
+        MONGO_URI,
+        tlsCAFile=certifi.where(),
+        serverSelectionTimeoutMS=10000,
+        connectTimeoutMS=20000
+    )
     DB_CLIENT.admin.command('ping')
     DB           = DB_CLIENT['eldercare_db']
     READINGS_COL = DB['health_readings']
@@ -114,7 +116,9 @@ except Exception as e:
     print(f"⚠️  Model failed: {e}")
     MODEL_READY = False
 
-# Gemini setup
+# ─────────────────────────────────────────────
+# GEMINI SETUP
+# ─────────────────────────────────────────────
 GEMINI_CLIENT = None
 if GEMINI_AVAILABLE and GEMINI_API_KEY:
     try:
@@ -124,6 +128,50 @@ if GEMINI_AVAILABLE and GEMINI_API_KEY:
         print(f"⚠️  Gemini failed: {e}")
 else:
     print("⚠️  Gemini not configured")
+
+# ─────────────────────────────────────────────
+# FALLBACK RECOMMENDATIONS (used when Gemini quota exceeded)
+# ─────────────────────────────────────────────
+FALLBACK_RECS = {
+    'Low': (
+        "ENGLISH: Your vital signs are within a healthy range — great work! "
+        "Continue eating a balanced diet low in salt and sugar, and aim for a 30-minute walk daily. "
+        "Monitor your blood pressure and blood sugar at home regularly. "
+        "Stay well-hydrated, maintain a consistent sleep schedule, and avoid smoking and alcohol. "
+        "Keep up these healthy habits and visit your doctor for a routine checkup every 6 months.\n\n"
+        "HINDI: Aapke vital signs normal range mein hain — bahut achha! "
+        "Balanced diet lein, namak aur cheeni kam karein aur roz 30 minute walk karein. "
+        "Ghar par BP aur sugar check karte rahein. Paani zyada piyein aur neend poori karein. "
+        "Smoking aur alcohol se bachein. Har 6 mahine routine checkup ke liye doctor se milein.\n\n"
+        "DOCTOR VISIT: Routine (every 6 months)"
+    ),
+    'Medium': (
+        "ENGLISH: Some of your readings need attention. "
+        "Reduce salt, sugar, and oily food in your diet immediately. "
+        "Engage in gentle daily exercise such as a 30-minute morning walk, and avoid stressful situations. "
+        "Take all prescribed medications on time without skipping any dose. "
+        "Keep a daily log of your blood pressure and blood sugar readings and share it with your doctor.\n\n"
+        "HINDI: Kuch readings thodi abnormal hain — dhyan dena zaroori hai. "
+        "Namak, cheeni aur tel wala khana turant kam karein. "
+        "Roz subah 30 minute walk karein aur stress se bachein. "
+        "Dawai bilkul samay par lein, koi bhi dose na chhodein. "
+        "Roz BP aur sugar note karein aur doctor ko dikhayein.\n\n"
+        "DOCTOR VISIT: Within a week"
+    ),
+    'High': (
+        "ENGLISH: Your readings indicate high health risk and require urgent medical attention. "
+        "Please contact your doctor or visit the nearest hospital as soon as possible — do not delay. "
+        "Keep your prescribed medications with you at all times and avoid any physical exertion. "
+        "If you feel chest pain, severe dizziness, or difficulty breathing, call emergency services immediately. "
+        "Do not ignore these readings — prompt medical care is essential for your safety.\n\n"
+        "HINDI: Aapki readings serious hain aur turant medical help zaroori hai. "
+        "Jald se jald doctor se milein ya nearest hospital jayein — bilkul deri na karein. "
+        "Apni dawai hamesha saath rakhein aur koi bhi physical kaam na karein. "
+        "Agar seene mein dard, chakkar ya saans lene mein takleef ho to turant ambulance bulayein. "
+        "Inmein laparwahi na karein — aapki jaan ke liye turant ilaj zaroori hai.\n\n"
+        "DOCTOR VISIT: Urgent — Visit doctor immediately"
+    )
+}
 
 # ─────────────────────────────────────────────
 # HELPERS
@@ -166,25 +214,35 @@ def prepare_features(data):
 
 
 def get_gemini_recommendation(data, risk_label):
+    fallback = FALLBACK_RECS.get(risk_label, FALLBACK_RECS['Medium'])
     if GEMINI_CLIENT is None:
-        return "Gemini not configured.\nHINDI: Gemini configure nahi hai."
-    try:
-        prompt = f"""
-You are a caring healthcare assistant for elderly Indian patients.
-Give recommendation in BOTH English and Hindi.
-Patient: Age {data.get('age')}, {data.get('gender')}, {data.get('existing_condition')}
-BP: {data.get('bp_systolic')}/{data.get('bp_diastolic')}, Sugar: {data.get('blood_sugar')},
-HR: {data.get('heart_rate')}, SpO2: {data.get('spo2')}, Risk: {risk_label}
-FORMAT:
-ENGLISH: [4-5 sentences]
-HINDI: [same in Hindi]
-DOCTOR VISIT: [Urgent / Within a week / Routine]
-"""
-        response = GEMINI_CLIENT.models.generate_content(
-            model="gemini-2.0-flash-lite", contents=prompt)
-        return response.text.strip()
-    except Exception as e:
-        return f"Gemini Error: {str(e)}"
+        return fallback
+
+    prompt = (
+        "You are a caring healthcare assistant for elderly Indian patients. "
+        "Give a warm, practical recommendation in BOTH English and Hindi.\n"
+        f"Patient: Age {data.get('age')}, {data.get('gender')}, Condition: {data.get('existing_condition')}\n"
+        f"Vitals: BP {data.get('bp_systolic')}/{data.get('bp_diastolic')} mmHg, "
+        f"Sugar {data.get('blood_sugar')} mg/dL, HR {data.get('heart_rate')} bpm, "
+        f"SpO2 {data.get('spo2')}%, Risk Level: {risk_label}\n\n"
+        "Follow this exact format:\n"
+        "ENGLISH: [4-5 practical sentences of health advice]\n\n"
+        "HINDI: [same advice in simple Hindi]\n\n"
+        "DOCTOR VISIT: [Urgent / Within a week / Routine]"
+    )
+
+    for model_name in ["gemini-2.0-flash-lite", "gemini-1.5-flash", "gemini-2.0-flash"]:
+        try:
+            response = GEMINI_CLIENT.models.generate_content(
+                model=model_name, contents=prompt)
+            return response.text.strip()
+        except Exception as e:
+            err = str(e)
+            if "429" in err or "RESOURCE_EXHAUSTED" in err or "quota" in err.lower():
+                continue
+            break
+
+    return fallback
 
 
 # ─────────────────────────────────────────────
@@ -243,7 +301,6 @@ def analyze():
         risk_label = label_map[int(prediction)]
         rec        = get_gemini_recommendation(data, risk_label)
 
-        # Save to MongoDB
         if READINGS_COL is not None:
             reading_doc = {
                 'user_name'         : data.get('user_name', 'Unknown'),
@@ -293,7 +350,6 @@ def get_history(user_name):
             {'_id': 0}
         ).sort('timestamp', -1).limit(10))
 
-        # Convert datetime to string
         for r in readings:
             if 'timestamp' in r:
                 r['timestamp'] = str(r['timestamp'])[:16]
@@ -331,7 +387,7 @@ if __name__ == '__main__':
     print("\n✅ Endpoints ready:")
     print("   GET  /health")
     print("   POST /predict")
-    print("   POST /analyze      ← Flutter uses this")
+    print("   POST /analyze      <- Flutter uses this")
     print("   GET  /history/<name>")
     print("   POST /save_user")
     print("\n   Open: http://localhost:5000/health")
