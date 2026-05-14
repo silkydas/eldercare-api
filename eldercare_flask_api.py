@@ -37,7 +37,7 @@ except ImportError:
 # ⚠️  UPDATE THESE VALUES
 # ─────────────────────────────────────────────
 import os
-GEMINI_API_KEY = "AIzaSyAcipgGsE2fyNkaLeE46nszgLGXCCXucBE" # keep directly for now
+GEMINI_API_KEY = "AIzaSyBw0n4MjZeml3ncaE24o2dMfMzQh_VzVoE" # keep directly for now
 
 from urllib.parse import quote_plus
 password  = quote_plus("eldercare@123")
