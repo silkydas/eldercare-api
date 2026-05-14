@@ -7,3 +7,4 @@ pymongo
 dnspython
 google-genai
 gunicorn
+certifi
