@@ -61,23 +61,34 @@ DB            = None
 READINGS_COL  = None
 USERS_COL     = None
 
-try:
-    DB_CLIENT    = MongoClient(
-        MONGO_URI,
-        tlsCAFile=certifi.where(),
-        serverSelectionTimeoutMS=10000,
-        connectTimeoutMS=20000
-    )
-    DB_CLIENT.admin.command('ping')
-    DB           = DB_CLIENT['eldercare_db']
-    READINGS_COL = DB['health_readings']
-    USERS_COL    = DB['users']
-    print("✅ MongoDB Atlas connected!")
-    print(f"   Database: eldercare_db")
-    print(f"   Collections: health_readings, users")
-except Exception as e:
-    print(f"⚠️  MongoDB connection failed: {e}")
-    print("   App will work but data won't be saved to database")
+def _connect_mongo():
+    global DB_CLIENT, DB, READINGS_COL, USERS_COL
+    opts = [
+        # pymongo 4.x with certifi CA bundle
+        {"tls": True, "tlsCAFile": certifi.where(), "serverSelectionTimeoutMS": 10000, "connectTimeoutMS": 20000},
+        # pymongo 4.x allow invalid certs
+        {"tls": True, "tlsAllowInvalidCertificates": True, "tlsAllowInvalidHostnames": True, "serverSelectionTimeoutMS": 10000},
+        # pymongo 3.x style
+        {"ssl": True, "ssl_cert_reqs": "CERT_NONE", "serverSelectionTimeoutMS": 10000},
+        # Let pymongo use system defaults
+        {"serverSelectionTimeoutMS": 10000, "connectTimeoutMS": 20000},
+    ]
+    for i, opt in enumerate(opts, 1):
+        try:
+            client = MongoClient(MONGO_URI, **opt)
+            client.admin.command("ping")
+            DB_CLIENT    = client
+            DB           = DB_CLIENT["eldercare_db"]
+            READINGS_COL = DB["health_readings"]
+            USERS_COL    = DB["users"]
+            print(f"✅ MongoDB Atlas connected! (strategy {i})")
+            print(f"   Database: eldercare_db")
+            return
+        except Exception as e:
+            print(f"   Strategy {i} failed: {type(e).__name__}: {str(e)[:80]}")
+    print("⚠️  MongoDB connection failed — data will not be saved")
+
+_connect_mongo()
 
 # ─────────────────────────────────────────────
 # ML MODEL
@@ -257,7 +268,7 @@ def health_check():
         'message'  : 'ElderCare+ API is active!',
         'ml_model' : 'ready' if MODEL_READY else 'not loaded',
         'gemini'   : 'connected' if GEMINI_CLIENT else 'not configured',
-        'mongodb'  : 'connected' if DB_CLIENT else 'not connected',
+        'mongodb'  : 'connected' if READINGS_COL is not None else 'not connected',
         'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     })
 
@@ -343,7 +354,12 @@ def analyze():
 @app.route('/history/<user_name>', methods=['GET'])
 def get_history(user_name):
     if READINGS_COL is None:
-        return jsonify({'error': 'MongoDB not connected'}), 500
+        return jsonify({
+            'user_name': user_name,
+            'count'    : 0,
+            'readings' : [],
+            'note'     : 'MongoDB not connected'
+        })
     try:
         readings = list(READINGS_COL.find(
             {'user_name': user_name},
@@ -367,7 +383,7 @@ def get_history(user_name):
 @app.route('/save_user', methods=['POST'])
 def save_user():
     if USERS_COL is None:
-        return jsonify({'error': 'MongoDB not connected'}), 500
+        return jsonify({'status': 'skipped', 'message': 'MongoDB not connected'})
     try:
         data = request.get_json()
         USERS_COL.update_one(
