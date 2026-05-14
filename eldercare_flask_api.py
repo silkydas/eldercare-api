@@ -65,7 +65,7 @@ READINGS_COL  = None
 USERS_COL     = None
 
 try:
-    DB_CLIENT    = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
+    DB_CLIENT    = MongoClient(MONGO_URI, tlsCAFile=certifi.where(), serverSelectionTimeoutMS=10000, connectTimeoutMS=20000)
     DB_CLIENT.admin.command('ping')
     DB           = DB_CLIENT['eldercare_db']
     READINGS_COL = DB['health_readings']
